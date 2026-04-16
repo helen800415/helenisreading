@@ -1,6 +1,10 @@
 const STORAGE_KEY = "media-timeline-entries";
 const SUPABASE_CONFIG_KEY = "helen-archive-supabase-config";
 const SUPABASE_TABLE = "timeline_entries";
+const DEFAULT_SUPABASE_CONFIG = {
+  url: "https://hdflbbxeasyicqrueqcs.supabase.co",
+  anonKey: "sb_publishable_QUBpe5MKqft8uyq3z_cLzw_0IXSq7dV"
+};
 const TYPE_CONFIG = {
   book: {
     label: "書籍",
@@ -1257,6 +1261,13 @@ function readSupabaseConfig() {
     return {
       url: String(window.HELEN_ARCHIVE_SUPABASE.url).trim(),
       anonKey: String(window.HELEN_ARCHIVE_SUPABASE.anonKey).trim()
+    };
+  }
+
+  if (DEFAULT_SUPABASE_CONFIG.url && DEFAULT_SUPABASE_CONFIG.anonKey) {
+    return {
+      url: DEFAULT_SUPABASE_CONFIG.url,
+      anonKey: DEFAULT_SUPABASE_CONFIG.anonKey
     };
   }
 
