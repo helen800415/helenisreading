@@ -47,6 +47,64 @@
             <p class="data-credit">自動查詢資料來源：豆瓣、Open Library、Google Books、Apple iTunes Search、TVmaze。</p>
           </div>
 
+          <section class="sync-panel" id="sync-panel">
+            <div class="sync-panel-header">
+              <div>
+                <h3>雲端同步</h3>
+                <p id="sync-mode-text">目前使用這個瀏覽器的本機儲存。接上 Supabase 後，就能跨電腦、跨瀏覽器看到同一份記錄。</p>
+              </div>
+              <span class="sync-badge" id="sync-badge">本機模式</span>
+            </div>
+
+            <p class="sync-status" id="sync-status" aria-live="polite"></p>
+
+            <div class="sync-form-grid">
+              <label>
+                Supabase URL
+                <input
+                  type="url"
+                  id="supabase-url"
+                  placeholder="https://your-project.supabase.co"
+                  spellcheck="false"
+                />
+              </label>
+
+              <label>
+                Supabase Anon Key
+                <textarea
+                  id="supabase-anon-key"
+                  rows="3"
+                  placeholder="貼上你的 anon public key"
+                  spellcheck="false"
+                ></textarea>
+              </label>
+            </div>
+
+            <div class="sync-actions">
+              <button type="button" class="ghost-btn" id="connect-supabase">連接 Supabase</button>
+              <button type="button" class="ghost-btn" id="refresh-supabase" hidden>從雲端重新整理</button>
+              <button type="button" class="ghost-btn" id="import-local" hidden>把目前記錄上傳到雲端</button>
+              <button type="button" class="text-btn" id="disconnect-supabase" hidden>中斷連接</button>
+            </div>
+
+            <div class="auth-panel" id="auth-panel" hidden>
+              <label>
+                管理用信箱
+                <input
+                  type="email"
+                  id="auth-email"
+                  placeholder="你要登入管理的 email"
+                  autocomplete="email"
+                />
+              </label>
+
+              <div class="sync-actions">
+                <button type="button" class="ghost-btn" id="send-magic-link">寄送登入連結</button>
+                <button type="button" class="text-btn" id="sign-out" hidden>登出</button>
+              </div>
+            </div>
+          </section>
+
           <form id="entry-form" class="entry-form">
             <div class="editing-bar" id="editing-bar" hidden>
               <span id="editing-label"></span>
@@ -226,6 +284,7 @@
       </article>
     </template>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./script.js"></script>
   </body>
 </html>

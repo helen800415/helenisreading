@@ -1,4 +1,6 @@
 const STORAGE_KEY = "media-timeline-entries";
+const SUPABASE_CONFIG_KEY = "helen-archive-supabase-config";
+const SUPABASE_TABLE = "timeline_entries";
 const TYPE_CONFIG = {
   book: {
     label: "書籍",
@@ -78,7 +80,15 @@ const state = {
   internalUpdate: false,
   lookupTimer: null,
   lookupRequestId: 0,
-  quote: buildHeroQuote(initialEntries)
+  quote: buildHeroQuote(initialEntries),
+  storageMode: "local",
+  syncClient: null,
+  syncBusy: false,
+  syncStatusMessage: "",
+  syncStatusState: "",
+  authSession: null,
+  authSubscription: null,
+  pendingImportEntries: initialEntries.map(cloneEntry)
 };
 
 const form = document.querySelector("#entry-form");
@@ -86,6 +96,19 @@ const timelineList = document.querySelector("#timeline-list");
 const itemTemplate = document.querySelector("#timeline-item-template");
 const filterRoot = document.querySelector("#type-filter");
 const clearButton = document.querySelector("#clear-all");
+const syncBadge = document.querySelector("#sync-badge");
+const syncModeText = document.querySelector("#sync-mode-text");
+const syncStatus = document.querySelector("#sync-status");
+const supabaseUrlInput = document.querySelector("#supabase-url");
+const supabaseKeyInput = document.querySelector("#supabase-anon-key");
+const connectSupabaseButton = document.querySelector("#connect-supabase");
+const refreshSupabaseButton = document.querySelector("#refresh-supabase");
+const importLocalButton = document.querySelector("#import-local");
+const disconnectSupabaseButton = document.querySelector("#disconnect-supabase");
+const authPanel = document.querySelector("#auth-panel");
+const authEmailInput = document.querySelector("#auth-email");
+const sendMagicLinkButton = document.querySelector("#send-magic-link");
+const signOutButton = document.querySelector("#sign-out");
 const titleInput = form.elements.title;
 const creatorInput = form.elements.creator;
 const manualCoverInput = form.elements.manualCoverUrl;
@@ -110,8 +133,16 @@ form.date.value = new Date().toISOString().slice(0, 10);
 syncFormPlaceholders();
 updatePreview();
 render();
+updateSyncUi();
+void initializeSupabase();
 
 form.addEventListener("submit", handleSubmit);
+connectSupabaseButton.addEventListener("click", () => void handleConnectSupabase());
+refreshSupabaseButton.addEventListener("click", () => void refreshEntriesFromCloud(true));
+importLocalButton.addEventListener("click", () => void importPendingEntriesToCloud());
+disconnectSupabaseButton.addEventListener("click", handleDisconnectSupabase);
+sendMagicLinkButton.addEventListener("click", () => void handleSendMagicLink());
+signOutButton.addEventListener("click", () => void handleSignOut());
 titleInput.addEventListener("input", () => {
   if (state.editingId) {
     updateFormMode();
@@ -156,26 +187,22 @@ filterRoot.addEventListener("click", (event) => {
 timelineList.addEventListener("click", (event) => {
   const deleteButton = event.target.closest(".card-delete-btn");
   if (deleteButton) {
+    if (!ensureWritable()) return;
+
     const entry = state.entries.find((item) => item.id === deleteButton.dataset.id);
     if (!entry) return;
 
     const shouldDelete = window.confirm(`確定要刪除《${entry.title}》嗎？`);
     if (!shouldDelete) return;
 
-    state.entries = state.entries.filter((item) => item.id !== entry.id);
-    state.quote = buildHeroQuote(state.entries);
-    persistEntries();
-
-    if (state.editingId === entry.id) {
-      cancelEditing(true);
-    }
-
-    render();
+    void deleteEntry(entry);
     return;
   }
 
   const editButton = event.target.closest(".card-edit-btn");
   if (!editButton) return;
+
+  if (!ensureWritable()) return;
 
   const entry = state.entries.find((item) => item.id === editButton.dataset.id);
   if (!entry) return;
@@ -184,15 +211,16 @@ timelineList.addEventListener("click", (event) => {
 });
 
 clearButton.addEventListener("click", () => {
-  const shouldReset = window.confirm("確定要清空目前瀏覽器中的記錄，並恢復示例資料嗎？");
+  if (!ensureWritable()) return;
+
+  const resetMessage =
+    state.storageMode === "supabase"
+      ? "確定要清空雲端資料，並恢復示例資料嗎？"
+      : "確定要清空目前瀏覽器中的記錄，並恢復示例資料嗎？";
+  const shouldReset = window.confirm(resetMessage);
   if (!shouldReset) return;
 
-  localStorage.removeItem(STORAGE_KEY);
-  state.entries = sampleEntries.map(cloneEntry).sort(sortByDateDesc);
-  state.quote = buildHeroQuote(state.entries);
-  persistEntries();
-  cancelEditing(true);
-  render();
+  void resetEntries();
 });
 
 cancelEditButton.addEventListener("click", () => cancelEditing(false));
@@ -200,6 +228,7 @@ cancelEditSecondaryButton.addEventListener("click", () => cancelEditing(false));
 
 async function handleSubmit(event) {
   event.preventDefault();
+  if (!ensureWritable()) return;
 
   const formData = new FormData(form);
   const type = normalizeType(formData.get("type"));
@@ -248,7 +277,11 @@ async function handleSubmit(event) {
   }
 
   state.quote = buildHeroQuote(state.entries);
-  persistEntries();
+  try {
+    await persistEntry(entry);
+  } catch (error) {
+    return;
+  }
   cancelEditing(true);
   render();
 }
@@ -277,6 +310,80 @@ function loadEntries() {
 
 function persistEntries() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
+  if (state.storageMode === "local") {
+    state.pendingImportEntries = state.entries.map(cloneEntry);
+  }
+}
+
+async function persistEntry(entry) {
+  if (state.storageMode === "supabase" && state.syncClient) {
+    const { error } = await state.syncClient.from(SUPABASE_TABLE).upsert(serializeEntry(entry));
+    if (error) {
+      console.error(error);
+      setSyncStatus("雲端儲存失敗，這次修改沒有成功寫入 Supabase。", "error");
+      throw error;
+    }
+
+    setSyncStatus("已同步到雲端。");
+  }
+
+  persistEntries();
+}
+
+async function deleteEntry(entry) {
+  if (state.storageMode === "supabase" && state.syncClient) {
+    const { error } = await state.syncClient.from(SUPABASE_TABLE).delete().eq("id", entry.id);
+    if (error) {
+      console.error(error);
+      setSyncStatus("刪除雲端資料失敗，請稍後再試。", "error");
+      return;
+    }
+
+    setSyncStatus("已從雲端刪除。");
+  }
+
+  state.entries = state.entries.filter((item) => item.id !== entry.id);
+  state.quote = buildHeroQuote(state.entries);
+  persistEntries();
+
+  if (state.editingId === entry.id) {
+    cancelEditing(true);
+  }
+
+  render();
+}
+
+async function resetEntries() {
+  const nextEntries = sampleEntries.map(cloneEntry).sort(sortByDateDesc);
+
+  if (state.storageMode === "supabase" && state.syncClient) {
+    const { error: deleteError } = await state.syncClient.from(SUPABASE_TABLE).delete().neq("id", "");
+    if (deleteError) {
+      console.error(deleteError);
+      setSyncStatus("重設雲端資料失敗，請稍後再試。", "error");
+      return;
+    }
+
+    const { error: insertError } = await state.syncClient
+      .from(SUPABASE_TABLE)
+      .insert(nextEntries.map((entry) => serializeEntry(entry)));
+    if (insertError) {
+      console.error(insertError);
+      setSyncStatus("示例資料回寫到雲端失敗。", "error");
+      return;
+    }
+
+    setSyncStatus("已用示例資料重設雲端。");
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  state.entries = nextEntries;
+  state.pendingImportEntries = nextEntries.map(cloneEntry);
+  state.quote = buildHeroQuote(state.entries);
+  persistEntries();
+  cancelEditing(true);
+  render();
 }
 
 function render() {
@@ -284,6 +391,7 @@ function render() {
   renderStats();
   renderFilters();
   renderTimeline();
+  updateSyncUi();
 }
 
 function renderHero() {
@@ -310,6 +418,7 @@ function renderFilters() {
 
 function renderTimeline() {
   const entries = state.entries.filter((entry) => state.filter === "all" || entry.type === state.filter);
+  const canWrite = canWriteEntries();
 
   timelineList.innerHTML = "";
 
@@ -347,7 +456,9 @@ function renderTimeline() {
     fragment.querySelector(".fallback-kicker").textContent = typeConfig.fallbackLabel;
     fragment.querySelector(".fallback-title").textContent = entry.title;
     editButton.dataset.id = entry.id;
+    editButton.disabled = !canWrite;
     fragment.querySelector(".card-delete-btn").dataset.id = entry.id;
+    fragment.querySelector(".card-delete-btn").disabled = !canWrite;
 
     if (entry.coverUrl) {
       cover.src = entry.coverUrl;
@@ -379,6 +490,11 @@ function renderTimeline() {
 }
 
 function startEditing(entry) {
+  if (!canWriteEntries()) {
+    setSyncStatus("目前是雲端唯讀模式，請先登入後再編輯。", "error");
+    return;
+  }
+
   state.editingId = entry.id;
   state.draftCoverUrl = entry.coverUrl || "";
   state.creatorTouched = false;
@@ -888,6 +1004,372 @@ function fetchJsonp(url) {
     script.src = `${url}${url.includes("?") ? "&" : "?"}callback=${callbackName}`;
     document.body.append(script);
   });
+}
+
+async function initializeSupabase() {
+  const config = readSupabaseConfig();
+  if (!config) {
+    setSyncStatus("目前使用本機儲存。完成 Supabase 設定後，記錄就能跨裝置同步。");
+    return;
+  }
+
+  supabaseUrlInput.value = config.url;
+  supabaseKeyInput.value = config.anonKey;
+  await connectToSupabase(config, true);
+}
+
+async function handleConnectSupabase() {
+  const config = {
+    url: String(supabaseUrlInput.value || "").trim(),
+    anonKey: String(supabaseKeyInput.value || "").trim()
+  };
+
+  await connectToSupabase(config, false);
+}
+
+async function connectToSupabase(config, silent) {
+  if (!config.url || !config.anonKey) {
+    setSyncStatus("先填入 Supabase URL 和 anon key。", "error");
+    return;
+  }
+
+  if (!window.supabase?.createClient) {
+    setSyncStatus("Supabase 載入失敗，請重新整理頁面。", "error");
+    return;
+  }
+
+  const localSnapshot = loadEntries().map(cloneEntry);
+  setSyncBusy(true);
+  setSyncStatus("正在連接 Supabase...", "loading");
+
+  try {
+    const client = window.supabase.createClient(config.url, config.anonKey);
+    bindAuthListener(client);
+
+    const {
+      data: { session },
+      error: sessionError
+    } = await client.auth.getSession();
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const remoteEntries = await fetchSupabaseEntries(client);
+
+    state.syncClient = client;
+    state.storageMode = "supabase";
+    state.authSession = session;
+    state.pendingImportEntries = localSnapshot;
+
+    saveSupabaseConfig(config);
+
+    if (remoteEntries.length) {
+      state.entries = remoteEntries;
+      state.quote = buildHeroQuote(state.entries);
+      persistEntries();
+      setSyncStatus(session ? "已連接雲端，且目前已登入。" : "已連接雲端，目前為唯讀模式；登入後可編輯。");
+    } else if (localSnapshot.length) {
+      state.entries = localSnapshot.sort(sortByDateDesc);
+      state.quote = buildHeroQuote(state.entries);
+      persistEntries();
+      setSyncStatus(
+        session
+          ? "雲端目前還是空的，你可以把目前這個瀏覽器的記錄上傳上去。"
+          : "雲端目前是空的；先登入，再把目前瀏覽器的記錄上傳到雲端。"
+      );
+    } else {
+      state.entries = [];
+      state.quote = buildHeroQuote(state.entries);
+      persistEntries();
+      setSyncStatus(session ? "已連接雲端，目前還沒有任何記錄。" : "已連接雲端，目前還沒有任何記錄；登入後即可新增。");
+    }
+
+    if (!silent) {
+      render();
+    } else {
+      render();
+    }
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("連接 Supabase 失敗。請確認 URL、anon key 與資料表設定。", "error");
+  } finally {
+    setSyncBusy(false);
+  }
+}
+
+function handleDisconnectSupabase() {
+  if (state.authSubscription) {
+    state.authSubscription.unsubscribe();
+    state.authSubscription = null;
+  }
+
+  state.syncClient = null;
+  state.storageMode = "local";
+  state.authSession = null;
+  clearSupabaseConfig();
+  setSyncStatus("已切回本機儲存模式。");
+  render();
+}
+
+async function handleSendMagicLink() {
+  if (!state.syncClient) {
+    setSyncStatus("請先連接 Supabase。", "error");
+    return;
+  }
+
+  const email = String(authEmailInput.value || "").trim();
+  if (!email) {
+    setSyncStatus("先填入你的管理用信箱。", "error");
+    return;
+  }
+
+  setSyncBusy(true);
+  setSyncStatus("正在寄送登入連結...", "loading");
+
+  const { error } = await state.syncClient.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: window.location.href
+    }
+  });
+
+  setSyncBusy(false);
+
+  if (error) {
+    console.error(error);
+    setSyncStatus("寄送登入連結失敗，請先確認 Supabase 已開啟 Email 驗證。", "error");
+    return;
+  }
+
+  setSyncStatus("登入連結已寄出。請到信箱開啟連結，再回到這個頁面。");
+}
+
+async function handleSignOut() {
+  if (!state.syncClient) return;
+
+  const { error } = await state.syncClient.auth.signOut();
+  if (error) {
+    console.error(error);
+    setSyncStatus("登出失敗，請稍後再試。", "error");
+    return;
+  }
+
+  state.authSession = null;
+  setSyncStatus("已登出，現在是雲端唯讀模式。");
+  render();
+}
+
+async function refreshEntriesFromCloud(showStatus) {
+  if (!state.syncClient) return;
+
+  setSyncBusy(true);
+  if (showStatus) {
+    setSyncStatus("正在從雲端重新整理...", "loading");
+  }
+
+  try {
+    const remoteEntries = await fetchSupabaseEntries(state.syncClient);
+    state.entries = remoteEntries;
+    state.quote = buildHeroQuote(state.entries);
+    persistEntries();
+    if (showStatus) {
+      setSyncStatus("已更新為雲端最新資料。");
+    }
+    render();
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("重新整理雲端資料失敗。", "error");
+  } finally {
+    setSyncBusy(false);
+  }
+}
+
+async function importPendingEntriesToCloud() {
+  if (!state.syncClient) {
+    setSyncStatus("請先連接 Supabase。", "error");
+    return;
+  }
+
+  if (!ensureWritable()) return;
+
+  if (!state.pendingImportEntries.length) {
+    setSyncStatus("目前沒有待上傳的本機記錄。");
+    return;
+  }
+
+  const shouldImport = window.confirm("要把目前這個瀏覽器中的記錄上傳到雲端嗎？");
+  if (!shouldImport) return;
+
+  setSyncBusy(true);
+  setSyncStatus("正在把本機記錄上傳到雲端...", "loading");
+
+  const payload = state.pendingImportEntries.map((entry) => serializeEntry(entry));
+  const { error } = await state.syncClient.from(SUPABASE_TABLE).upsert(payload);
+
+  if (error) {
+    console.error(error);
+    setSyncBusy(false);
+    setSyncStatus("上傳到雲端失敗，請檢查資料表與權限設定。", "error");
+    return;
+  }
+
+  state.pendingImportEntries = [];
+  setSyncBusy(false);
+  await refreshEntriesFromCloud(false);
+  setSyncStatus("已把目前記錄合併到雲端。");
+}
+
+async function fetchSupabaseEntries(client) {
+  const { data, error } = await client
+    .from(SUPABASE_TABLE)
+    .select("id, type, title, creator, cover_url, date, rating, tags, note")
+    .order("date", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data) ? data.map(normalizeSupabaseEntry).sort(sortByDateDesc) : [];
+}
+
+function bindAuthListener(client) {
+  if (state.authSubscription) {
+    state.authSubscription.unsubscribe();
+    state.authSubscription = null;
+  }
+
+  const {
+    data: { subscription }
+  } = client.auth.onAuthStateChange((_event, session) => {
+    state.authSession = session;
+    if (session?.user?.email) {
+      authEmailInput.value = session.user.email;
+    }
+    render();
+  });
+
+  state.authSubscription = subscription;
+}
+
+function readSupabaseConfig() {
+  if (window.HELEN_ARCHIVE_SUPABASE?.url && window.HELEN_ARCHIVE_SUPABASE?.anonKey) {
+    return {
+      url: String(window.HELEN_ARCHIVE_SUPABASE.url).trim(),
+      anonKey: String(window.HELEN_ARCHIVE_SUPABASE.anonKey).trim()
+    };
+  }
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY) || "null");
+    if (saved?.url && saved?.anonKey) {
+      return {
+        url: String(saved.url).trim(),
+        anonKey: String(saved.anonKey).trim()
+      };
+    }
+  } catch (error) {
+    console.warn("Failed to parse Supabase config.", error);
+  }
+
+  return null;
+}
+
+function saveSupabaseConfig(config) {
+  localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
+}
+
+function clearSupabaseConfig() {
+  localStorage.removeItem(SUPABASE_CONFIG_KEY);
+}
+
+function serializeEntry(entry) {
+  return {
+    id: entry.id,
+    type: entry.type,
+    title: entry.title,
+    creator: entry.creator,
+    cover_url: entry.coverUrl,
+    date: entry.date,
+    rating: entry.rating,
+    tags: entry.tags,
+    note: entry.note
+  };
+}
+
+function normalizeSupabaseEntry(entry) {
+  return normalizeEntry({
+    id: entry.id,
+    type: entry.type,
+    title: entry.title,
+    creator: entry.creator,
+    coverUrl: entry.cover_url,
+    date: entry.date,
+    rating: entry.rating,
+    tags: entry.tags,
+    note: entry.note
+  });
+}
+
+function canWriteEntries() {
+  return state.storageMode !== "supabase" || Boolean(state.authSession);
+}
+
+function ensureWritable() {
+  if (canWriteEntries()) {
+    return true;
+  }
+
+  setSyncStatus("目前已連接雲端，但還沒有登入，所以只能瀏覽；登入後才能新增、編輯與刪除。", "error");
+  return false;
+}
+
+function setSyncBusy(isBusy) {
+  state.syncBusy = isBusy;
+  updateSyncUi();
+}
+
+function setSyncStatus(message, stateName) {
+  state.syncStatusMessage = message;
+  state.syncStatusState = stateName || "";
+  updateSyncUi();
+}
+
+function updateSyncUi() {
+  const isCloud = state.storageMode === "supabase";
+  const canWrite = canWriteEntries();
+
+  syncBadge.textContent = isCloud ? "雲端模式" : "本機模式";
+  syncModeText.textContent = isCloud
+    ? canWrite
+      ? "目前已連接 Supabase，且你已登入，新增、編輯與刪除都會直接同步到雲端。"
+      : "目前已連接 Supabase，但還沒登入；其他瀏覽器會看到同一份資料，你需要登入後才能修改。"
+    : "目前使用這個瀏覽器的本機儲存。接上 Supabase 後，就能跨電腦、跨瀏覽器看到同一份記錄。";
+
+  syncStatus.textContent = state.syncStatusMessage;
+  if (state.syncStatusState) {
+    syncStatus.dataset.state = state.syncStatusState;
+  } else {
+    delete syncStatus.dataset.state;
+  }
+
+  connectSupabaseButton.disabled = state.syncBusy;
+  refreshSupabaseButton.hidden = !isCloud;
+  refreshSupabaseButton.disabled = state.syncBusy;
+  importLocalButton.hidden = !isCloud || !state.pendingImportEntries.length;
+  importLocalButton.disabled = state.syncBusy || !canWrite;
+  disconnectSupabaseButton.hidden = !isCloud;
+  disconnectSupabaseButton.disabled = state.syncBusy;
+  authPanel.hidden = !isCloud;
+  authEmailInput.disabled = state.syncBusy;
+  supabaseUrlInput.disabled = state.syncBusy;
+  supabaseKeyInput.disabled = state.syncBusy;
+  sendMagicLinkButton.disabled = state.syncBusy;
+  signOutButton.hidden = !state.authSession;
+  signOutButton.disabled = state.syncBusy;
+  submitButton.disabled = state.syncBusy || !canWrite;
+  clearButton.disabled = state.syncBusy || !canWrite;
+  clearButton.textContent = isCloud ? "重設雲端資料" : "重設示例資料";
 }
 
 function normalizeEntry(entry) {

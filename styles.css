@@ -153,6 +153,75 @@ textarea {
   font-size: 0.84rem;
 }
 
+.sync-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 18px;
+  background: #f5f8f4;
+  border: 1px solid rgba(39, 51, 46, 0.06);
+}
+
+.sync-panel-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sync-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.sync-panel-header p,
+.sync-status {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.sync-status[data-state="loading"] {
+  color: var(--text);
+}
+
+.sync-status[data-state="error"] {
+  color: #9b5b4a;
+}
+
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #eef3ee;
+  color: var(--text);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.sync-form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.auth-panel {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(39, 51, 46, 0.08);
+}
+
 .entry-form {
   display: grid;
   gap: 16px;
@@ -385,6 +454,12 @@ textarea {
   padding: 0;
   background: transparent;
   color: var(--accent);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none !important;
 }
 
 .content-grid {
@@ -845,6 +920,10 @@ textarea {
 
   .card-actions {
     justify-content: flex-start;
+  }
+
+  .sync-panel-header {
+    display: grid;
   }
 }
 
