@@ -20,34 +20,7 @@
           <h1>把看過的書、電影與影集，整理成一條自己的時間流。</h1>
           <p class="hero-text" id="hero-quote"></p>
           <p class="hero-attribution" id="hero-attribution"></p>
-          <div class="hero-stats" id="hero-stats">
-            <article>
-              <span id="count-all">0</span>
-              <label>總記錄</label>
-            </article>
-            <article>
-              <span id="count-books">0</span>
-              <label>書籍</label>
-            </article>
-            <article>
-              <span id="count-movies">0</span>
-              <label>電影</label>
-            </article>
-            <article>
-              <span id="count-series">0</span>
-              <label>影集</label>
-            </article>
-          </div>
-        </div>
-
-        <section class="entry-panel">
-          <div class="panel-heading">
-            <h2>新增記錄</h2>
-            <p>輸入標題後自動帶入封面與作者 / 導演 / 主創，找不到時會保留預設封面。</p>
-            <p class="data-credit">自動查詢資料來源：豆瓣、Open Library、Google Books、Apple iTunes Search、TVmaze。</p>
-          </div>
-
-          <section class="sync-panel" id="sync-panel">
+          <section class="sync-panel sync-panel-inline" id="sync-panel">
             <div class="sync-panel-header">
               <div>
                 <h3>雲端同步</h3>
@@ -104,6 +77,32 @@
               </div>
             </div>
           </section>
+          <div class="hero-stats" id="hero-stats">
+            <article>
+              <span id="count-all">0</span>
+              <label>總記錄</label>
+            </article>
+            <article>
+              <span id="count-books">0</span>
+              <label>書籍</label>
+            </article>
+            <article>
+              <span id="count-movies">0</span>
+              <label>電影</label>
+            </article>
+            <article>
+              <span id="count-series">0</span>
+              <label>影集</label>
+            </article>
+          </div>
+        </div>
+
+        <section class="entry-panel">
+          <div class="panel-heading">
+            <h2>新增記錄</h2>
+            <p>輸入標題後自動帶入封面與作者 / 導演 / 主創，找不到時會保留預設封面。</p>
+            <p class="data-credit">自動查詢資料來源：豆瓣、Open Library、Google Books、Apple iTunes Search、TVmaze。</p>
+          </div>
 
           <form id="entry-form" class="entry-form">
             <div class="editing-bar" id="editing-bar" hidden>

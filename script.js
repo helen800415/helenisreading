@@ -74,6 +74,69 @@ const sampleEntries = [
   }
 ];
 
+const BOOK_QUOTES = [
+  {
+    en: "Not all those who wander are lost.",
+    zh: "并不是所有流浪的人，都迷失了方向。",
+    title: "The Fellowship of the Ring",
+    author: "J. R. R. Tolkien"
+  },
+  {
+    en: "Whatever our souls are made of, his and mine are the same.",
+    zh: "无论灵魂由什么构成，他的与我的，是同一种东西。",
+    title: "Wuthering Heights",
+    author: "Emily Bronte"
+  },
+  {
+    en: "I am no bird; and no net ensnares me.",
+    zh: "我不是鸟，也没有任何罗网能困住我。",
+    title: "Jane Eyre",
+    author: "Charlotte Bronte"
+  },
+  {
+    en: "It is our choices that show what we truly are.",
+    zh: "真正定义我们的，是我们所作的选择。",
+    title: "Harry Potter and the Chamber of Secrets",
+    author: "J. K. Rowling"
+  },
+  {
+    en: "There is no greater agony than bearing an untold story inside you.",
+    zh: "心里藏着一个未说出的故事，没有比这更深的痛苦了。",
+    title: "I Know Why the Caged Bird Sings",
+    author: "Maya Angelou"
+  },
+  {
+    en: "Memories warm you up from the inside. But they also tear you apart.",
+    zh: "回忆会从内部给你温度，也会从内部把你撕开。",
+    title: "Kafka on the Shore",
+    author: "Haruki Murakami"
+  },
+  {
+    en: "And now that you don't have to be perfect, you can be good.",
+    zh: "现在你不必再追求完美了，你终于可以变得真切而良善。",
+    title: "East of Eden",
+    author: "John Steinbeck"
+  },
+  {
+    en: "I cannot live without my life! I cannot live without my soul!",
+    zh: "没有我的生命，我活不下去；没有我的灵魂，我也活不下去。",
+    title: "Wuthering Heights",
+    author: "Emily Bronte"
+  },
+  {
+    en: "The only way out of the labyrinth of suffering is to forgive.",
+    zh: "走出痛苦迷宫的唯一方法，是宽恕。",
+    title: "Looking for Alaska",
+    author: "John Green"
+  },
+  {
+    en: "All we have to decide is what to do with the time that is given us.",
+    zh: "我们真正需要决定的，只是如何使用被给予我们的时间。",
+    title: "The Fellowship of the Ring",
+    author: "J. R. R. Tolkien"
+  }
+];
+
 const initialEntries = loadEntries();
 const state = {
   entries: initialEntries,
@@ -84,7 +147,7 @@ const state = {
   internalUpdate: false,
   lookupTimer: null,
   lookupRequestId: 0,
-  quote: buildHeroQuote(initialEntries),
+  quote: buildHeroQuote(),
   storageMode: "local",
   syncClient: null,
   syncBusy: false,
@@ -280,7 +343,7 @@ async function handleSubmit(event) {
     state.entries = [entry, ...state.entries].sort(sortByDateDesc);
   }
 
-  state.quote = buildHeroQuote(state.entries);
+  state.quote = buildHeroQuote();
   try {
     await persistEntry(entry);
   } catch (error) {
@@ -347,7 +410,7 @@ async function deleteEntry(entry) {
   }
 
   state.entries = state.entries.filter((item) => item.id !== entry.id);
-  state.quote = buildHeroQuote(state.entries);
+  state.quote = buildHeroQuote();
   persistEntries();
 
   if (state.editingId === entry.id) {
@@ -384,7 +447,7 @@ async function resetEntries() {
 
   state.entries = nextEntries;
   state.pendingImportEntries = nextEntries.map(cloneEntry);
-  state.quote = buildHeroQuote(state.entries);
+  state.quote = buildHeroQuote();
   persistEntries();
   cancelEditing(true);
   render();
@@ -1069,12 +1132,12 @@ async function connectToSupabase(config, silent) {
 
     if (remoteEntries.length) {
       state.entries = remoteEntries;
-      state.quote = buildHeroQuote(state.entries);
+      state.quote = buildHeroQuote();
       persistEntries();
       setSyncStatus(session ? "已連接雲端，且目前已登入。" : "已連接雲端，目前為唯讀模式；登入後可編輯。");
     } else if (localSnapshot.length) {
       state.entries = localSnapshot.sort(sortByDateDesc);
-      state.quote = buildHeroQuote(state.entries);
+      state.quote = buildHeroQuote();
       persistEntries();
       setSyncStatus(
         session
@@ -1083,7 +1146,7 @@ async function connectToSupabase(config, silent) {
       );
     } else {
       state.entries = [];
-      state.quote = buildHeroQuote(state.entries);
+      state.quote = buildHeroQuote();
       persistEntries();
       setSyncStatus(session ? "已連接雲端，目前還沒有任何記錄。" : "已連接雲端，目前還沒有任何記錄；登入後即可新增。");
     }
@@ -1174,7 +1237,7 @@ async function refreshEntriesFromCloud(showStatus) {
   try {
     const remoteEntries = await fetchSupabaseEntries(state.syncClient);
     state.entries = remoteEntries;
-    state.quote = buildHeroQuote(state.entries);
+    state.quote = buildHeroQuote();
     persistEntries();
     if (showStatus) {
       setSyncStatus("已更新為雲端最新資料。");
@@ -1500,27 +1563,19 @@ function withInternalUpdate(callback) {
   state.internalUpdate = false;
 }
 
-function buildHeroQuote(entries) {
-  if (!entries.length) {
+function buildHeroQuote() {
+  const quote = BOOK_QUOTES[Math.floor(Math.random() * BOOK_QUOTES.length)];
+
+  if (!quote) {
     return {
-      text: "有些作品結束得很快，卻會在很久以後，才慢慢顯出它留下的回聲。",
-      attribution: "從你的時間流開始，慢慢累積這句回聲。"
+      text: "A reader lives a thousand lives before he dies.\n人在死去之前，会先活过一千次。",
+      attribution: "《A Dance with Dragons》, George R. R. Martin"
     };
   }
 
-  const entry = entries[Math.floor(Math.random() * entries.length)];
-  const noteSeed = trimEndingPunctuation(entry.note) || `《${entry.title}》總會在某個時刻重新回來。`;
-  const typeLabel = getTypeConfig(entry.type).label;
-  const templates = [
-    `《${entry.title}》之後才明白，${noteSeed}。`,
-    `真正留下來的，往往不是情節本身，而是《${entry.title}》讓人遲遲說不清的那點餘味。`,
-    `有些${entry.type === "book" ? "句子" : "鏡頭"}並不會立刻發亮，像《${entry.title}》這樣，常常要隔一段時間才慢慢抵達。`,
-    `時間把許多細節帶走，卻會把《${entry.title}》裡最安靜的那一部分，悄悄留下來。`
-  ];
-
   return {
-    text: templates[Math.floor(Math.random() * templates.length)],
-    attribution: `隨機取自你已經看過的${typeLabel}：《${entry.title}》`
+    text: `${quote.en}\n${quote.zh}`,
+    attribution: `《${quote.title}》, ${quote.author}`
   };
 }
 
