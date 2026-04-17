@@ -57,6 +57,14 @@ textarea {
   align-items: stretch;
 }
 
+body[data-admin-mode="false"] .hero {
+  grid-template-columns: 1fr;
+}
+
+body[data-admin-mode="false"] .hero-copy {
+  max-width: 860px;
+}
+
 .hero-copy,
 .entry-panel,
 .toolbar {

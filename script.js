@@ -1,6 +1,7 @@
 const STORAGE_KEY = "media-timeline-entries";
 const SUPABASE_CONFIG_KEY = "helen-archive-supabase-config";
 const SUPABASE_TABLE = "timeline_entries";
+const ADMIN_MODE = new URLSearchParams(window.location.search).get("admin") === "1";
 const DEFAULT_SUPABASE_CONFIG = {
   url: "https://hdflbbxeasyicqrueqcs.supabase.co",
   anonKey: "sb_publishable_QUBpe5MKqft8uyq3z_cLzw_0IXSq7dV"
@@ -155,10 +156,13 @@ const state = {
   syncStatusState: "",
   authSession: null,
   authSubscription: null,
-  pendingImportEntries: initialEntries.map(cloneEntry)
+  pendingImportEntries: initialEntries.map(cloneEntry),
+  adminMode: ADMIN_MODE
 };
 
 const form = document.querySelector("#entry-form");
+const entryPanel = document.querySelector("#entry-panel");
+const syncPanel = document.querySelector("#sync-panel");
 const timelineList = document.querySelector("#timeline-list");
 const itemTemplate = document.querySelector("#timeline-item-template");
 const filterRoot = document.querySelector("#type-filter");
@@ -197,6 +201,7 @@ const heroAttribution = document.querySelector("#hero-attribution");
 const typeInputs = Array.from(document.querySelectorAll('input[name="type"]'));
 
 form.date.value = new Date().toISOString().slice(0, 10);
+document.body.dataset.adminMode = String(state.adminMode);
 syncFormPlaceholders();
 updatePreview();
 render();
@@ -524,8 +529,10 @@ function renderTimeline() {
     fragment.querySelector(".fallback-title").textContent = entry.title;
     editButton.dataset.id = entry.id;
     editButton.disabled = !canWrite;
+    editButton.hidden = !state.adminMode;
     fragment.querySelector(".card-delete-btn").dataset.id = entry.id;
     fragment.querySelector(".card-delete-btn").disabled = !canWrite;
+    fragment.querySelector(".card-delete-btn").hidden = !state.adminMode;
 
     if (entry.coverUrl) {
       cover.src = entry.coverUrl;
@@ -1386,12 +1393,16 @@ function normalizeSupabaseEntry(entry) {
 }
 
 function canWriteEntries() {
-  return state.storageMode !== "supabase" || Boolean(state.authSession);
+  return state.adminMode && (state.storageMode !== "supabase" || Boolean(state.authSession));
 }
 
 function ensureWritable() {
   if (canWriteEntries()) {
     return true;
+  }
+
+  if (!state.adminMode) {
+    return false;
   }
 
   setSyncStatus("目前已連接雲端，但還沒有登入，所以只能瀏覽；登入後才能新增、編輯與刪除。", "error");
@@ -1412,6 +1423,14 @@ function setSyncStatus(message, stateName) {
 function updateSyncUi() {
   const isCloud = state.storageMode === "supabase";
   const canWrite = canWriteEntries();
+  const showAdminPanel = state.adminMode;
+
+  syncPanel.hidden = !showAdminPanel;
+  entryPanel.hidden = !showAdminPanel;
+
+  if (!showAdminPanel) {
+    return;
+  }
 
   syncBadge.textContent = isCloud ? "雲端模式" : "本機模式";
   syncModeText.textContent = isCloud
